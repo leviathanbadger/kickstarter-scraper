@@ -12,6 +12,7 @@
   "author": "Brandon Slade <brandonyoyoslade@gmail.com>",
   "license": "UNLICENSED",
   "dependencies": {
+    "axios": "^0.19.2",
     "domino": "^2.1.6"
   },
   "devDependencies": {
