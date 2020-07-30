@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as domino from 'domino';
 import { pledgeConfig, PledgeConfig } from './config';
 
-const SLEEP_MILLIS=1000 * 60 * 5; // Every five minutes
+const SLEEP_MILLIS=1000*60*5; // Every five minutes
 
 function delay(millis: number): Promise<void> {
     return new Promise(resolve => {
@@ -28,6 +28,16 @@ async function checkPledgeAvailability(config: PledgeConfig): Promise<boolean> {
 async function sendAvailabilityNotification(config: PledgeConfig, isAvailable: boolean): Promise<void> {
     let message = isAvailable ? `Pledge available! GO GET IT! ${config.projectHref}` : 'Whoops, too late. Try again later.';
     console.log(message);
+
+    let slackWebhookUrl = process.env.SLACK_WEBHOOK_URL;
+    if (!slackWebhookUrl) return;
+    try {
+        await axios.post(slackWebhookUrl, { text: message });
+    }
+    catch (e) {
+        console.error('Failed to send message via slack.');
+        console.error(e);
+    }
 }
 
 async function main() {
