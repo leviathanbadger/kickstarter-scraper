@@ -1,0 +1,23 @@
+{
+  "name": "kickstarter-scraper",
+  "version": "0.0.1",
+  "description": "Lets me know when kickstarter tiers become available.",
+  "scripts": {
+    "build": "tsc",
+    "start": "node .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "main": "./dist/index.js",
+  "typinfs": "./dist/index",
+  "author": "Brandon Slade <brandonyoyoslade@gmail.com>",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@types/node": "^14.0.27",
+    "domino": "^2.1.6",
+    "typescript": "^3.9.7"
+  },
+  "repository": {
+      "type": "git",
+      "url": "git@github.com:leviathanbadger/kickstarter-scraper.git"
+  }
+}
