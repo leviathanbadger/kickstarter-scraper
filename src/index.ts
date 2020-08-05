@@ -3,8 +3,9 @@ import createHttpsProxyAgent = require('https-proxy-agent');
 import * as domino from 'domino';
 import { pledgeConfig, PledgeConfig } from './config';
 
-const SLEEP_MILLIS=1000*60*3; // Every three minutes
-const BACKOFF_SLEEP_MILLIS=1000*60*15; // Every fifteen minutes
+const SLEEP_MILLIS = 1000*60*3; // Every three minutes
+const PLEDGE_SLEEP_MILLIS = 1000*60*3; // Every minute
+const BACKOFF_SLEEP_ADD = [0, 1000*60*2, 1000*60*7, 1000*60*12, 1000*60*27, 1000*60*57]; // Backoff to three, five, ten, fifteen, thirty, sixty minutes
 
 const proxyUsername = process.env.PROXY_USERNAME;
 const proxyPassword = process.env.PROXY_PASSWORD;
@@ -35,7 +36,7 @@ async function sendMessage(message: string) {
     }
 }
 
-async function checkPledgeAvailability(config: PledgeConfig): Promise<boolean> {
+async function checkPledgeAvailability(config: PledgeConfig): Promise<string[] | null> {
     try {
         console.log('Attempting to fetch pledge information...');
         let result = await proxyAxios.get(config.projectHref);
@@ -43,33 +44,70 @@ async function checkPledgeAvailability(config: PledgeConfig): Promise<boolean> {
         let window = domino.createWindow(result.data);
         let document = window.document;
         let availablePledges = [...document.querySelectorAll('.sticky-rewards .mobile-hide ol > .pledge--available')]
-                                    .map(el => el.getAttribute('data-reward-id'));
-        return config.pledges.some(pledge => availablePledges.indexOf(pledge) !== -1);
+                                    .map(el => ({
+                                        id: el.getAttribute('data-reward-id')!,
+                                        name: el.querySelector('.pledge__info .pledge__title')?.textContent?.trim() || '(unknown)'
+                                    }));
+        return availablePledges
+            .filter(availablePledge => config.pledges.indexOf(availablePledge.id) !== -1)
+            .map(availablePledge => availablePledge.name);
     }
     catch (e) {
         console.error(e);
         await sendMessage('Failed to fetch pledge information. Check logs, might have hit ratelimiter.');
-        await delay(BACKOFF_SLEEP_MILLIS);
-        return false;
+        return null;
     }
 }
 
-async function sendAvailabilityNotification(config: PledgeConfig, isAvailable: boolean): Promise<void> {
-    let message = isAvailable ? `Pledge available! GO GET IT! ${config.projectHref}` : 'Whoops, too late. Try again later.';
+async function sendAvailabilityNotification(config: PledgeConfig, availablePledges: string[]): Promise<void> {
+    let message: string;
+    if (!availablePledges.length) message = 'Whoops, too late. Try again later.';
+    else if (availablePledges.length === 1) message = `Pledge available! "${availablePledges[0]}". GO GET IT! ${config.projectHref}`;
+    else message = `Pledges available! ${availablePledges.map(name => `"${name}"`).join(', ')}. GO GET ONE! ${config.projectHref}`;
     await sendMessage(message);
 }
 
+function areArraysSameIgnoringOrder<T>(one: T[] | null, two: T[] | null) {
+    if (!!one !== !!two) return false;
+    if (!one || !two) return true;
+    if (one.length !== two.length) return false;
+    for (let val of one) {
+        if (two.indexOf(val) === -1) return false;
+    }
+    return true;
+}
+
 async function main() {
-    let hadAvailablePledge = false;
+    await sendMessage('Starting scraper.');
+
+    let previouslyAvailablePledges: string[] = [];
+    let backoffIndex = 0;
 
     while (true) {
-        let hasAvailablePledge = await checkPledgeAvailability(pledgeConfig);
-        if (hasAvailablePledge !== hadAvailablePledge) {
-            await sendAvailabilityNotification(pledgeConfig, hasAvailablePledge);
+        let availablePledges = await checkPledgeAvailability(pledgeConfig);
+        if (availablePledges) {
+            if (!areArraysSameIgnoringOrder(availablePledges, previouslyAvailablePledges)) {
+                await sendAvailabilityNotification(pledgeConfig, availablePledges);
+            }
+            previouslyAvailablePledges = availablePledges;
+            backoffIndex = 0;
+            await delay(!!availablePledges.length ? PLEDGE_SLEEP_MILLIS : SLEEP_MILLIS);
         }
-        hadAvailablePledge = hasAvailablePledge;
-        await delay(SLEEP_MILLIS);
+        else {
+            backoffIndex++;
+            let sleepTime = SLEEP_MILLIS + BACKOFF_SLEEP_ADD[backoffIndex >= BACKOFF_SLEEP_ADD.length ? BACKOFF_SLEEP_ADD.length - 1 : backoffIndex];
+            await delay(sleepTime);
+        }
     }
 }
 
-main();
+process.on('SIGINT', async function() {
+    console.info('Handling SIGINT. Stopping scraper.');
+    await sendMessage('Stopping scraper.');
+    process.exit();
+});
+
+main().catch(err => {
+    console.error(err);
+    sendMessage('Fatal error, uncought. Aborting scraper. Check logs.');
+});
